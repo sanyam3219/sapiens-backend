@@ -8,7 +8,7 @@ app.use(express.json());
 
 // SECURITY: Only allow requests from your specific GitHub Pages URL
 app.use(cors({
-    origin: 'https://sanyam3219.github.io' 
+    origin: 'https://sanyam3219.github.io/research-school' 
 }));
 
 // Initialize OpenAI using the hidden environment variable
