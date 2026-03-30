@@ -23,7 +23,8 @@ app.use('/api/', limiter);
 
 // OpenAI client
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey: process.env.GROQ_API_KEY,
+    baseURL: 'https://api.groq.com/openai/v1',
 });
 
 // Input validation helper
@@ -57,7 +58,7 @@ app.post('/api/generate', async (req, res) => {
         const timeout = setTimeout(() => controller.abort(), 25000);
 
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: 'llama-3.3-70b-versatile',
             messages: [
                 {
                     role: 'system',
