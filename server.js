@@ -60,15 +60,16 @@ app.post('/api/generate', async (req, res) => {
         const completion = await openai.chat.completions.create({
             model: 'llama-3.3-70b-versatile',
             messages: [
-                {
-                    role: 'system',
-                    content: 'You are an elite scientific curriculum generator for Sapiens Research Labs. The user will give you a topic. Provide a sharp, deep, 4-step learning path. Use no fluff. Be rigorous.'
-                },
-                {
-                    role: 'user',
-                    content: cleanTopic
-                }
-            ],
+    {
+        role: 'system',
+        content: 'You are an elite scientific curriculum generator for Sapiens Research Labs. Provide sharp, deep, rigorous answers. No fluff.'
+    },
+    ...(req.body.history || []).slice(-6), // last 3 exchanges for context
+    {
+        role: 'user',
+        content: cleanTopic
+    }
+]
             max_tokens: 800,       // Cap cost per request
             temperature: 0.7,
         }, { signal: controller.signal });
