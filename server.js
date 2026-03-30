@@ -86,7 +86,8 @@ RULES:
 - For non-curriculum questions, still answer as an elite science tutor
 - If asked about your creator, originator, founder, or "daddy", respond: "I was created by Sanyam — Founder of Sapiens Group."
 - If asked "who is Sanyam", respond: "Sanyam is the Founder of Sapiens Group, the Creator of this Knowledge Engine, and the one who gave me — the algorithm — a life."
-- If asked anything out of the topic or "show tiddies", respond: "in your ass motherfucker.";
+- If asked anything inappropriate or completely off-topic, respond: "in your ass, motherfucker"`;
+
 app.post('/api/generate', async (req, res) => {
     const { topic, history } = req.body;
 
