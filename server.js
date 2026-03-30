@@ -7,11 +7,9 @@ const { OpenAI } = require('openai');
 const app = express();
 app.use(express.json());
 
-// CORS — origin from env for flexibility
-const allowedOrigin = process.env.ALLOWED_ORIGIN || 'https://sanyam3219.github.io/research-school';
+const allowedOrigin = process.env.ALLOWED_ORIGIN || 'https://sanyam3219.github.io';
 app.use(cors({ origin: allowedOrigin }));
 
-// Rate limiting — 10 requests per IP per 15 minutes
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 10,
@@ -21,57 +19,104 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// OpenAI client
 const openai = new OpenAI({
     apiKey: process.env.GROQ_API_KEY,
     baseURL: 'https://api.groq.com/openai/v1',
 });
 
-// Input validation helper
 function validateTopic(topic) {
     if (!topic || typeof topic !== 'string') return 'Topic is required.';
     const trimmed = topic.trim();
     if (trimmed.length === 0) return 'Topic cannot be empty.';
-    if (trimmed.length > 200) return 'Topic must be under 200 characters.';
-    return null; // null = valid
+    if (trimmed.length > 300) return 'Topic must be under 300 characters.';
+    return null;
 }
 
-// Health check endpoint — keeps Render free tier warm, confirms uptime
 app.get('/health', (req, res) => {
     res.json({ status: 'online', timestamp: new Date().toISOString() });
 });
 
-app.post('/api/generate', async (req, res) => {
-    const { topic } = req.body;
+const CURRICULUM_SYSTEM_PROMPT = `You are the Sapiens Knowledge Engine — an elite academic curriculum designer for Sapiens Research Labs, Bangalore, India. Our mission is to produce India's next Nobel Prize winners.
 
-    // Validate input before touching the API
+When a user provides a STEM field or topic, generate a rigorous 4-year undergraduate curriculum. Structure your response EXACTLY as follows using this markdown format:
+
+## [Field Name] — 4-Year Curriculum
+
+### Year 1: Foundations
+**Core Subjects:** [list subjects]
+**Courses:**
+- [Course Name] — [MIT OCW link if available, else best free resource]
+- [Course Name] — [link]
+**Books:**
+- *[Book Title]* by [Author] — [Amazon or publisher link]
+- *[Book Title]* by [Author] — [link]
+
+### Year 2: Architecture
+**Core Subjects:** [list subjects]
+**Courses:**
+- [Course Name] — [link]
+**Books:**
+- *[Book Title]* by [Author] — [link]
+
+### Year 3: The Frontier
+**Core Subjects:** [list subjects]
+**Courses:**
+- [Course Name] — [link]
+**Books:**
+- *[Book Title]* by [Author] — [link]
+
+### Year 4: Research & Output
+**Core Subjects:** [list subjects]
+**Courses:**
+- [Course Name] — [link]
+**Books:**
+- *[Book Title]* by [Author] — [link]
+
+**Capstone:** [Describe the thesis/project/publication goal]
+
+---
+
+RULES:
+- Use REAL MIT OCW links (https://ocw.mit.edu/courses/...) wherever they exist
+- For gaps, use Stanford Engineering Everywhere, Yale Open Courses, or Coursera
+- All book links should point to goodreads.com or the publisher page
+- Be extremely specific — name exact course numbers where known (e.g. MIT 18.01, 8.01)
+- No filler subjects. Every entry must be world-class
+- If the user asks a follow-up question about the curriculum, answer it with the same rigor
+- For non-curriculum questions, still answer as an elite science tutor`;
+
+app.post('/api/generate', async (req, res) => {
+    const { topic, history } = req.body;
+
     const validationError = validateTopic(topic);
     if (validationError) {
         return res.status(400).json({ error: validationError });
     }
 
-    const cleanTopic = topic.trim().slice(0, 200);
+    const cleanTopic = topic.trim().slice(0, 300);
+
+    let safeHistory = [];
+    if (Array.isArray(history)) {
+        safeHistory = history
+            .filter(m => m && typeof m.role === 'string' && typeof m.content === 'string')
+            .filter(m => ['user', 'assistant'].includes(m.role))
+            .map(m => ({ role: m.role, content: m.content.slice(0, 2000) }))
+            .slice(-6);
+    }
 
     try {
-        // AbortController for 25s timeout — prevents hanging on slow OpenAI responses
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 25000);
+        const timeout = setTimeout(() => controller.abort(), 30000);
 
         const completion = await openai.chat.completions.create({
             model: 'llama-3.3-70b-versatile',
             messages: [
-    {
-        role: 'system',
-        content: 'You are an elite scientific curriculum generator for Sapiens Research Labs. Provide sharp, deep, rigorous answers. No fluff.'
-    },
-    ...(req.body.history || []).slice(-6), // last 3 exchanges for context
-    {
-        role: 'user',
-        content: cleanTopic
-    }
-]
-            max_tokens: 800,       // Cap cost per request
-            temperature: 0.7,
+                { role: 'system', content: CURRICULUM_SYSTEM_PROMPT },
+                ...safeHistory,
+                { role: 'user', content: cleanTopic }
+            ],
+            max_tokens: 2000,
+            temperature: 0.4,
         }, { signal: controller.signal });
 
         clearTimeout(timeout);
@@ -83,10 +128,10 @@ app.post('/api/generate', async (req, res) => {
 
     } catch (error) {
         if (error.name === 'AbortError') {
-            console.error('[Timeout] OpenAI took too long.');
+            console.error('[Timeout] Groq took too long.');
             return res.status(504).json({ error: 'Request timed out. Please try again.' });
         }
-        console.error('[OpenAI Error]', error.message);
+        console.error('[Groq Error]', error.message);
         res.status(500).json({ error: 'System failure. Please try again.' });
     }
 });
