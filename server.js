@@ -8,7 +8,7 @@ const app = express();
 app.use(express.json());
 
 // CORS — origin from env for flexibility
-const allowedOrigin = process.env.ALLOWED_ORIGIN || 'https://sanyam3219.github.io';
+const allowedOrigin = process.env.ALLOWED_ORIGIN || 'https://sanyam3219.github.io/research-school';
 app.use(cors({ origin: allowedOrigin }));
 
 // Rate limiting — 10 requests per IP per 15 minutes
