@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { OpenAI } = require('openai');
+const { tavily } = require('@tavily/core');
 
 const app = express();
 app.use(express.json());
@@ -24,12 +25,27 @@ const openai = new OpenAI({
     baseURL: 'https://api.groq.com/openai/v1',
 });
 
+const tvly = tavily({ apiKey: process.env.TAVILY_API_KEY });
+
 function validateTopic(topic) {
     if (!topic || typeof topic !== 'string') return 'Topic is required.';
     const trimmed = topic.trim();
     if (trimmed.length === 0) return 'Topic cannot be empty.';
     if (trimmed.length > 300) return 'Topic must be under 300 characters.';
     return null;
+}
+
+async function searchWeb(query) {
+    try {
+        const response = await tvly.search(query, {
+            max_results: 3,
+            search_depth: 'basic'
+        });
+        return response.results.map(r => `- ${r.title}: ${r.url}\n  ${r.content}`).join('\n');
+    } catch (e) {
+        console.error('[Tavily Error]', e.message);
+        return '';
+    }
 }
 
 app.get('/health', (req, res) => {
@@ -88,6 +104,12 @@ app.post('/api/generate', async (req, res) => {
             .slice(-6);
     }
 
+    // Fetch live web context via Tavily
+    const webContext = await searchWeb(`MIT OCW ${cleanTopic} free course`);
+    const dynamicPrompt = CURRICULUM_SYSTEM_PROMPT + (webContext
+        ? `\n\nLIVE WEB CONTEXT (use these real links where relevant):\n${webContext}`
+        : '');
+
     try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 30000);
@@ -95,7 +117,7 @@ app.post('/api/generate', async (req, res) => {
         const completion = await openai.chat.completions.create({
             model: 'llama-3.3-70b-versatile',
             messages: [
-                { role: 'system', content: CURRICULUM_SYSTEM_PROMPT },
+                { role: 'system', content: dynamicPrompt },
                 ...safeHistory,
                 { role: 'user', content: cleanTopic }
             ],
