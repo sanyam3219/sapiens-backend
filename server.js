@@ -4,6 +4,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { OpenAI } = require('openai');
 const { tavily } = require('@tavily/core');
+const multer = require('multer');
 
 const app = express();
 app.use(express.json());
@@ -20,12 +21,21 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
+const voiceLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Voice limit reached. Try again in 1 hour.' }
+});
+
 const openai = new OpenAI({
     apiKey: process.env.GROQ_API_KEY,
     baseURL: 'https://api.groq.com/openai/v1',
 });
 
 const tvly = tavily({ apiKey: process.env.TAVILY_API_KEY });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 function validateTopic(topic) {
     if (!topic || typeof topic !== 'string') return 'Topic is required.';
@@ -106,7 +116,6 @@ app.post('/api/generate', async (req, res) => {
             .slice(-6);
     }
 
-    // Fetch live web context via Tavily
     const webContext = await searchWeb(`MIT OCW ${cleanTopic} free course`);
     const dynamicPrompt = CURRICULUM_SYSTEM_PROMPT + (webContext
         ? `\n\nLIVE WEB CONTEXT (use these real links where relevant):\n${webContext}`
@@ -141,6 +150,77 @@ app.post('/api/generate', async (req, res) => {
         }
         console.error('[Groq Error]', error.message);
         res.status(500).json({ error: 'System failure. Please try again.' });
+    }
+});
+
+// ── STT: Browser audio → Sarvam Saaras v3 → transcript ──────────────────
+app.post('/api/stt', voiceLimiter, upload.single('audio'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No audio file received.' });
+
+    const { default: fetch } = await import('node-fetch');
+    const { FormData, Blob } = await import('node-fetch');
+
+    const formData = new FormData();
+    const blob = new Blob([req.file.buffer], { type: req.file.mimetype || 'audio/webm' });
+    formData.append('file', blob, 'audio.webm');
+    formData.append('model', 'saaras:v3');
+    formData.append('mode', 'transcribe');
+    formData.append('language_code', 'en-IN');
+
+    try {
+        const response = await fetch('https://api.sarvam.ai/speech-to-text', {
+            method: 'POST',
+            headers: { 'api-subscription-key': process.env.SARVAM_API_KEY },
+            body: formData
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Sarvam STT failed');
+        res.json({ transcript: data.transcript });
+    } catch (err) {
+        console.error('[Sarvam STT Error]', err.message);
+        res.status(500).json({ error: 'Speech recognition failed.' });
+    }
+});
+
+// ── TTS: Text → Sarvam Bulbul v3 → base64 audio ─────────────────────────
+app.post('/api/tts', voiceLimiter, async (req, res) => {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: 'No text provided.' });
+
+    const { default: fetch } = await import('node-fetch');
+
+    const clean = text
+        .replace(/[#*`|>\-]+/g, '')
+        .replace(/\[.*?\]\(.*?\)/g, '')
+        .replace(/\n{2,}/g, '. ')
+        .replace(/\n/g, ' ')
+        .trim()
+        .slice(0, 2000);
+
+    try {
+        const response = await fetch('https://api.sarvam.ai/text-to-speech', {
+            method: 'POST',
+            headers: {
+                'api-subscription-key': process.env.SARVAM_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                inputs: [clean],
+                target_language_code: 'en-IN',
+                speaker: 'shubh',
+                model: 'bulbul:v3',
+                pace: 1.0,
+                pitch: 0.0,
+                loudness: 1.0,
+                enable_preprocessing: true
+            })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Sarvam TTS failed');
+        res.json({ audio: data.audios[0] });
+    } catch (err) {
+        console.error('[Sarvam TTS Error]', err.message);
+        res.status(500).json({ error: 'Speech synthesis failed.' });
     }
 });
 
