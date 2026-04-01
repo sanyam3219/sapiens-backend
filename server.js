@@ -7,7 +7,7 @@ const { tavily } = require('@tavily/core');
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json()); // ← must be before any route
+app.use(express.json());
 
 const allowedOrigin = process.env.ALLOWED_ORIGIN || 'https://sanyam3219.github.io';
 app.use(cors({ origin: allowedOrigin }));
@@ -34,7 +34,7 @@ function validateTopic(topic) {
     if (trimmed.length === 0) return 'Topic cannot be empty.';
     if (trimmed.length > 300) return 'Topic must be under 300 characters.';
     return null;
-}
+} // ← this closing brace was missing in your file
 
 async function searchWeb(query) {
     try {
@@ -47,7 +47,7 @@ async function searchWeb(query) {
         console.error('[Tavily Error]', e.message);
         return '';
     }
-}
+} // ← this closing brace was missing in your file
 
 app.get('/health', (req, res) => {
     res.json({ status: 'online', timestamp: new Date().toISOString() });
