@@ -22,13 +22,17 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // ── Key Rotator ───────────────────────────────────────────────────────────
+// To add more keys in future: just add GROQ_API_KEY_3, GROQ_API_KEY_4 on Render
+// and add process.env.GROQ_API_KEY_3 etc. to this array. Nothing else to change.
 const GROQ_KEYS = [
     process.env.GROQ_API_KEY_1,
     process.env.GROQ_API_KEY_2,
-].filter(Boolean); // removes undefined if a key isn't set
+    // process.env.GROQ_API_KEY_3,
+    // process.env.GROQ_API_KEY_4,
+].filter(Boolean);
 
 if (GROQ_KEYS.length === 0) {
-    console.error('FATAL: No Groq API keys found. Set GROQ_API_KEY_1 and GROQ_API_KEY_2.');
+    console.error('FATAL: No Groq API keys found. Set GROQ_API_KEY_1 and GROQ_API_KEY_2 in environment.');
     process.exit(1);
 }
 
@@ -41,9 +45,11 @@ function getGroqClient() {
     });
 }
 
-function rotateKey() {
+// Only called when current key hits 429 (tokens exhausted)
+function rotateToNextKey() {
+    const exhaustedIndex = currentKeyIndex;
     currentKeyIndex = (currentKeyIndex + 1) % GROQ_KEYS.length;
-    console.log(`[Key Rotator] Switched to key index ${currentKeyIndex}`);
+    console.warn(`[Key Rotator] Key ${exhaustedIndex + 1} exhausted → switching to Key ${currentKeyIndex + 1}`);
 }
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -133,7 +139,7 @@ app.post('/api/generate', async (req, res) => {
         ? `\n\nLIVE WEB CONTEXT (use these real links where relevant):\n${webContext}`
         : '');
 
-    // Try current key, rotate on 429, retry once with next key
+    // Try each key once — only rotates when current key hits 429
     for (let attempt = 0; attempt < GROQ_KEYS.length; attempt++) {
         try {
             const openai = getGroqClient();
@@ -156,9 +162,7 @@ app.post('/api/generate', async (req, res) => {
             const result = completion.choices[0]?.message?.content;
             if (!result) throw new Error('Empty response from model.');
 
-            // Rotate key after every successful request (spreads load evenly)
-            rotateKey();
-
+            // Success — stay on current key, do NOT rotate
             return res.json({ result });
 
         } catch (error) {
@@ -167,10 +171,11 @@ app.post('/api/generate', async (req, res) => {
                 return res.status(504).json({ error: 'Request timed out. Please try again.' });
             }
             if (error.status === 429) {
-                console.warn(`[Key Rotator] Key ${currentKeyIndex} hit 429. Rotating...`);
-                rotateKey();
-                if (attempt < GROQ_KEYS.length - 1) continue; // retry with next key
-                return res.status(429).json({ error: 'All keys at daily limit. Resets at 5:30 AM IST.' });
+                // This key is exhausted — rotate and retry with next key
+                rotateToNextKey();
+                if (attempt < GROQ_KEYS.length - 1) continue;
+                // All keys exhausted
+                return res.status(429).json({ error: 'All API keys at daily limit. Resets at 5:30 AM IST.' });
             }
             console.error('[Groq Error]', error.message);
             return res.status(500).json({ error: 'System failure. Please try again.' });
