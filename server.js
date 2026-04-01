@@ -21,10 +21,31 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-const openai = new OpenAI({
-    apiKey: process.env.GROQ_API_KEY,
-    baseURL: 'https://api.groq.com/openai/v1',
-});
+// ── Key Rotator ───────────────────────────────────────────────────────────
+const GROQ_KEYS = [
+    process.env.GROQ_API_KEY_1,
+    process.env.GROQ_API_KEY_2,
+].filter(Boolean); // removes undefined if a key isn't set
+
+if (GROQ_KEYS.length === 0) {
+    console.error('FATAL: No Groq API keys found. Set GROQ_API_KEY_1 and GROQ_API_KEY_2.');
+    process.exit(1);
+}
+
+let currentKeyIndex = 0;
+
+function getGroqClient() {
+    return new OpenAI({
+        apiKey: GROQ_KEYS[currentKeyIndex],
+        baseURL: 'https://api.groq.com/openai/v1',
+    });
+}
+
+function rotateKey() {
+    currentKeyIndex = (currentKeyIndex + 1) % GROQ_KEYS.length;
+    console.log(`[Key Rotator] Switched to key index ${currentKeyIndex}`);
+}
+// ─────────────────────────────────────────────────────────────────────────
 
 const tvly = tavily({ apiKey: process.env.TAVILY_API_KEY });
 
@@ -34,7 +55,7 @@ function validateTopic(topic) {
     if (trimmed.length === 0) return 'Topic cannot be empty.';
     if (trimmed.length > 300) return 'Topic must be under 300 characters.';
     return null;
-} // ← this closing brace was missing in your file
+}
 
 async function searchWeb(query) {
     try {
@@ -47,7 +68,7 @@ async function searchWeb(query) {
         console.error('[Tavily Error]', e.message);
         return '';
     }
-} // ← this closing brace was missing in your file
+}
 
 app.get('/health', (req, res) => {
     res.json({ status: 'online', timestamp: new Date().toISOString() });
@@ -112,39 +133,48 @@ app.post('/api/generate', async (req, res) => {
         ? `\n\nLIVE WEB CONTEXT (use these real links where relevant):\n${webContext}`
         : '');
 
-    try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 30000);
+    // Try current key, rotate on 429, retry once with next key
+    for (let attempt = 0; attempt < GROQ_KEYS.length; attempt++) {
+        try {
+            const openai = getGroqClient();
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 30000);
 
-        const completion = await openai.chat.completions.create({
-            model: 'llama-3.3-70b-versatile',
-            messages: [
-                { role: 'system', content: dynamicPrompt },
-                ...safeHistory,
-                { role: 'user', content: cleanTopic }
-            ],
-            max_tokens: 2500,
-            temperature: 0.3,
-        }, { signal: controller.signal });
+            const completion = await openai.chat.completions.create({
+                model: 'llama-3.3-70b-versatile',
+                messages: [
+                    { role: 'system', content: dynamicPrompt },
+                    ...safeHistory,
+                    { role: 'user', content: cleanTopic }
+                ],
+                max_tokens: 2500,
+                temperature: 0.3,
+            }, { signal: controller.signal });
 
-        clearTimeout(timeout);
+            clearTimeout(timeout);
 
-        const result = completion.choices[0]?.message?.content;
-        if (!result) throw new Error('Empty response from model.');
+            const result = completion.choices[0]?.message?.content;
+            if (!result) throw new Error('Empty response from model.');
 
-        res.json({ result });
+            // Rotate key after every successful request (spreads load evenly)
+            rotateKey();
 
-    } catch (error) {
-        if (error.name === 'AbortError') {
-            console.error('[Timeout] Groq took too long.');
-            return res.status(504).json({ error: 'Request timed out. Please try again.' });
+            return res.json({ result });
+
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.error('[Timeout] Groq took too long.');
+                return res.status(504).json({ error: 'Request timed out. Please try again.' });
+            }
+            if (error.status === 429) {
+                console.warn(`[Key Rotator] Key ${currentKeyIndex} hit 429. Rotating...`);
+                rotateKey();
+                if (attempt < GROQ_KEYS.length - 1) continue; // retry with next key
+                return res.status(429).json({ error: 'All keys at daily limit. Resets at 5:30 AM IST.' });
+            }
+            console.error('[Groq Error]', error.message);
+            return res.status(500).json({ error: 'System failure. Please try again.' });
         }
-        if (error.status === 429) {
-            console.error('[Groq 429]', error.message);
-            return res.status(429).json({ error: 'Daily limit reached. Resets at 5:30 AM IST.' });
-        }
-        console.error('[Groq Error]', error.message);
-        res.status(500).json({ error: 'System failure. Please try again.' });
     }
 });
 
