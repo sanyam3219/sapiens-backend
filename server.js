@@ -6,7 +6,7 @@ const { OpenAI } = require('openai');
 const { tavily } = require('@tavily/core');
 
 const app = express();
-app.use(express.json());
+app.set('trust proxy', 1); 
 
 const allowedOrigin = process.env.ALLOWED_ORIGIN || 'https://sanyam3219.github.io';
 app.use(cors({ origin: allowedOrigin }));
