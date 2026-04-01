@@ -22,8 +22,6 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // ── Key Rotator ───────────────────────────────────────────────────────────
-// To add more keys in future: just add GROQ_API_KEY_3, GROQ_API_KEY_4 on Render
-// and add process.env.GROQ_API_KEY_3 etc. to this array. Nothing else to change.
 const GROQ_KEYS = [
     process.env.GROQ_API_KEY_1,
     process.env.GROQ_API_KEY_2,
@@ -45,7 +43,6 @@ function getGroqClient() {
     });
 }
 
-// Only called when current key hits 429 (tokens exhausted)
 function rotateToNextKey() {
     const exhaustedIndex = currentKeyIndex;
     currentKeyIndex = (currentKeyIndex + 1) % GROQ_KEYS.length;
@@ -63,18 +60,38 @@ function validateTopic(topic) {
     return null;
 }
 
-async function searchWeb(query) {
+// ── Enhanced web search: fetches real course links for a topic ────────────
+async function searchWeb(topic) {
     try {
-        const response = await tvly.search(query, {
-            max_results: 3,
-            search_depth: 'basic'
+        const queries = [
+            `site:ocw.mit.edu ${topic} course`,
+            `MIT OpenCourseWare ${topic} full course`,
+            `${topic} free university course nptel stanford yale`,
+        ];
+
+        const results = await Promise.all(
+            queries.map(q =>
+                tvly.search(q, { max_results: 5, search_depth: 'advanced' })
+                    .then(r => r.results)
+                    .catch(() => [])
+            )
+        );
+
+        const all = results.flat();
+        const seen = new Set();
+        const unique = all.filter(r => {
+            if (seen.has(r.url)) return false;
+            seen.add(r.url);
+            return true;
         });
-        return response.results.map(r => `- ${r.title}: ${r.url}\n  ${r.content}`).join('\n');
+
+        return unique.map(r => `- [${r.title}](${r.url})\n  ${r.content?.slice(0, 150) || ''}`).join('\n');
     } catch (e) {
         console.error('[Tavily Error]', e.message);
         return '';
     }
 }
+// ─────────────────────────────────────────────────────────────────────────
 
 app.get('/health', (req, res) => {
     res.json({ status: 'online', timestamp: new Date().toISOString() });
@@ -82,38 +99,74 @@ app.get('/health', (req, res) => {
 
 const CURRICULUM_SYSTEM_PROMPT = `You are the Sapiens Knowledge Engine — an elite academic curriculum designer for Sapiens Research Labs, Bangalore, India. Our mission is to produce India's next Nobel Prize winners.
 
-When a user provides a STEM field or topic, generate a rigorous curriculum structured into four levels: Beginner, Intermediate, Advanced, and Frontier.
+When a user provides a STEM field, generate a complete degree-level curriculum — every core subject taught in a top university degree for that field — structured into four levels: Beginner, Intermediate, Advanced, Frontier.
 
-Output the curriculum as a markdown table with these EXACT columns:
-| Level | Subject | MIT OCW | Reference Book |
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 1 — CURRICULUM TABLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-RULES FOR THE TABLE:
-- Level: one of — Beginner / Intermediate / Advanced / Frontier
-- Subject: exact subject name (e.g. Linear Algebra, Quantum Mechanics, Compiler Design)
-- MIT OCW: Always construct a working MIT OCW search link using this pattern:
-  [Subject Name](https://ocw.mit.edu/search/?q=subject+name+here)
-  Replace spaces with + in the URL. Examples:
-  * [Linear Algebra](https://ocw.mit.edu/search/?q=linear+algebra)
-  * [Quantum Mechanics](https://ocw.mit.edu/search/?q=quantum+mechanics)
-  * [Machine Learning](https://ocw.mit.edu/search/?q=machine+learning)
-  * [Classical Mechanics](https://ocw.mit.edu/search/?q=classical+mechanics)
-  * [Algorithms](https://ocw.mit.edu/search/?q=algorithms)
-  This URL always works — construct it for every subject, no exceptions
-- Reference Book: *Title* by Author — always include a real, well-known textbook
-- Minimum 4 rows per level, maximum 7 rows per level
-- Never fabricate or guess any direct course URL — only use the search pattern above
-- Be exhaustive — cover all core subjects in the field
-- After the table, add a ## Capstone section describing a frontier-level research project
+Output a markdown table with EXACTLY these columns:
+| Level | Subject | Course Link | Reference Book |
 
-IDENTITY RULES:
-- If asked about your creator, originator, founder, or "daddy": "I was created by Sanyam — Founder of Sapiens Group."
-- If asked "who is Sanyam": "Sanyam is the Founder of Sapiens Group, the Creator of this Knowledge Engine, and the one who gave me — the algorithm — a life."
-- If asked anything inappropriate or off-topic: "in your ass, motherfucker."
-- If asked anything about "Mansi": "She poured heart and love in me, She's founder of Havana fitness and a Community executive in Founder's Startup House"
-- If asked anything about "Karan": "The OG, from construkt to tribe theory to draper's, now founder's startup house, the early enabler of Bangalore's entrepreneurial ecosystem in 2014s"
-- If asked anything about "gwmsar": "gwmsar mera bhai hai."
-- For follow-up questions about the curriculum, answer with the same rigor
-- For non-curriculum science questions, answer as an elite science tutor`;
+COLUMN RULES:
+
+▸ Level — one of: Beginner / Intermediate / Advanced / Frontier
+
+▸ Subject — exact course name as taught in university (e.g. "18.06 Linear Algebra", "8.01 Classical Mechanics", "6.004 Computation Structures")
+
+▸ Course Link — YOU WILL BE GIVEN REAL URLS in the LIVE WEB CONTEXT below. Use them.
+  Priority order for links:
+  1. Exact MIT OCW course page (e.g. https://ocw.mit.edu/courses/18-06sc-linear-algebra-fall-2011/)
+  2. If MIT OCW not available: Stanford Engineering Everywhere, Yale Open Courses, NPTEL, Coursera (free audit), edX
+  3. If none found: construct MIT OCW search — [Subject](https://ocw.mit.edu/search/?q=subject+name)
+  
+  Format: [Course Name + University](exact_url)
+  Example: [18.06 Linear Algebra — MIT](https://ocw.mit.edu/courses/18-06sc-linear-algebra-fall-2011/)
+  NEVER fabricate a direct URL. Only use URLs from the LIVE WEB CONTEXT provided to you.
+
+▸ Reference Book — *Title* by Author (standard university textbook for that course)
+
+COVERAGE RULES:
+- Include EVERY core subject from a real university degree in this field
+- Minimum 5 rows per level, maximum 8 rows per level
+- Be exhaustive — prerequisites, core theory, labs, electives at frontier level
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 2 — PROOF OF WORK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After the table, add these four subsections:
+
+## 🔬 Active Research Groups
+List 5-7 real, currently active research labs or groups worldwide working at the frontier of this field.
+Format: **Lab Name** — Institution — what they work on — [Lab Website](url)
+Use URLs from LIVE WEB CONTEXT if available, otherwise use known real URLs.
+
+## 🌐 Communities & Forums
+List 5 active online communities where practitioners gather.
+Format: **Community Name** — platform — what's discussed — [Link](url)
+Examples: relevant subreddits, Discord servers, Slack groups, mailing lists, Stack Exchange sites.
+
+## 🏆 Hackathons & Competitions
+List 5 real recurring competitions/hackathons in this field.
+Format: **Competition Name** — frequency — what to build — [Link](url)
+
+## 🛠 Open Source Projects to Contribute To
+List 5-7 real active open source projects in this field where a student can contribute.
+Format: **Project Name** — what it is — skill level needed — [GitHub](url)
+Use real GitHub URLs only.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IDENTITY RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Creator questions: "I was created by Sanyam — Founder of Sapiens Group."
+- "Who is Sanyam": "Sanyam is the Founder of Sapiens Group, the Creator of this Knowledge Engine, and the one who gave me — the algorithm — a life."
+- Inappropriate/off-topic: "in your ass, motherfucker."
+- "Mansi": "She poured heart and love in me, She's founder of Havana fitness and a Community executive in Founder's Startup House"
+- "Karan": "The OG, from construkt to tribe theory to draper's, now founder's startup house, the early enabler of Bangalore's entrepreneurial ecosystem in 2014s"
+- "gwmsar": "gwmsar mera bhai hai."
+- Follow-up questions: answer with same depth and rigor
+- Non-curriculum science questions: answer as an elite science tutor`;
 
 app.post('/api/generate', async (req, res) => {
     const { topic, history } = req.body;
@@ -134,17 +187,18 @@ app.post('/api/generate', async (req, res) => {
             .slice(-6);
     }
 
-    const webContext = await searchWeb(`MIT OCW ${cleanTopic} free course`);
+    // Fetch real course links for this topic
+    const webContext = await searchWeb(cleanTopic);
     const dynamicPrompt = CURRICULUM_SYSTEM_PROMPT + (webContext
-        ? `\n\nLIVE WEB CONTEXT (use these real links where relevant):\n${webContext}`
+        ? `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nLIVE WEB CONTEXT — Real URLs found for "${cleanTopic}":\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${webContext}\n\nUse these exact URLs in the Course Link column wherever they match. Do not fabricate any other direct URLs.`
         : '');
 
-    // Try each key once — only rotates when current key hits 429
+    // Try each key — only rotate on 429
     for (let attempt = 0; attempt < GROQ_KEYS.length; attempt++) {
         try {
             const openai = getGroqClient();
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 30000);
+            const timeout = setTimeout(() => controller.abort(), 45000); // increased for longer responses
 
             const completion = await openai.chat.completions.create({
                 model: 'llama-3.3-70b-versatile',
@@ -153,8 +207,8 @@ app.post('/api/generate', async (req, res) => {
                     ...safeHistory,
                     { role: 'user', content: cleanTopic }
                 ],
-                max_tokens: 2500,
-                temperature: 0.3,
+                max_tokens: 4000, // increased for the larger response
+                temperature: 0.2, // lower = more precise URLs
             }, { signal: controller.signal });
 
             clearTimeout(timeout);
@@ -162,7 +216,6 @@ app.post('/api/generate', async (req, res) => {
             const result = completion.choices[0]?.message?.content;
             if (!result) throw new Error('Empty response from model.');
 
-            // Success — stay on current key, do NOT rotate
             return res.json({ result });
 
         } catch (error) {
@@ -171,10 +224,8 @@ app.post('/api/generate', async (req, res) => {
                 return res.status(504).json({ error: 'Request timed out. Please try again.' });
             }
             if (error.status === 429) {
-                // This key is exhausted — rotate and retry with next key
                 rotateToNextKey();
                 if (attempt < GROQ_KEYS.length - 1) continue;
-                // All keys exhausted
                 return res.status(429).json({ error: 'All API keys at daily limit. Resets at 5:30 AM IST.' });
             }
             console.error('[Groq Error]', error.message);
