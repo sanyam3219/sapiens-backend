@@ -9,7 +9,7 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(express.json());
 
-const allowedOrigin = process.env.ALLOWED_ORIGIN || 'https://sanyam3219.github.io';
+const allowedOrigin = process.env.ALLOWED_ORIGIN || 'https://sapiensgroup.netlify.app/';
 app.use(cors({ origin: allowedOrigin }));
 
 const limiter = rateLimit({
