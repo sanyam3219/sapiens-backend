@@ -9,8 +9,20 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(express.json());
 
-const allowedOrigin = process.env.ALLOWED_ORIGIN || 'https://sapiensgroup.netlify.app';
-app.use(cors({ origin: allowedOrigin }));
+const allowedOrigins = [
+  process.env.ALLOWED_ORIGIN,
+  process.env.ALLOWED_ORIGIN_2,
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+}));
 
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
