@@ -37,7 +37,7 @@ app.use('/api/', limiter);
 const GROQ_KEYS = [
     process.env.GROQ_API_KEY_1,
     process.env.GROQ_API_KEY_2,
-    process.env.GROQ_API_KEY, // Fallback for single key configuration
+    process.env.GROQ_API_KEY, // Fallback if single key is set
 ].filter(Boolean);
 
 if (GROQ_KEYS.length === 0) {
@@ -241,7 +241,7 @@ app.post('/api/generate', async (req, res) => {
                 return res.status(429).json({ error: 'All API keys at daily limit. Resets at 5:30 AM IST.' });
             }
 
-            // Detailed status output for easier debugging in Render logs
+            // Expose error details to frontend instead of generic status mask
             return res.status(500).json({ error: `Backend API Failure (${error.status || 500}): ${error.message}` });
         }
     }
