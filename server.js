@@ -210,7 +210,7 @@ app.post('/api/generate', async (req, res) => {
             const timeout = setTimeout(() => controller.abort(), 45000);
 
             const completion = await openai.chat.completions.create({
-                model: 'mixtral-8x7b-32768', // Highly stable and available on Groq
+                model: 'openai/gpt-oss-20b', // Current active Groq model
                 messages: [
                     { role: 'system', content: dynamicPrompt },
                     ...safeHistory,
