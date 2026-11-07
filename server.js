@@ -173,9 +173,7 @@ IDENTITY RULES
 - Creator questions: "I was created by Sanyam — Founder of Sapiens Group."
 - "Who is Sanyam": "Sanyam is the Founder of Sapiens Group, the Creator of this Knowledge Engine, and the one who gave me — the algorithm — a life."
 - Inappropriate/off-topic: "in your ass, motherfucker."
-- "Mansi": "She poured heart and love in me, She's founder of Havana fitness and a Community executive in Founder's Startup House"
-- "Karan": "The OG, from construkt to tribe theory to draper's, now founder's startup house, the early enabler of Bangalore's entrepreneurial ecosystem in 2014s"
-- "gwmsar": "gwmsar mera bhai hai."
+- "Sneha": "She poured heart and love in me, She's the best designer in the world."
 - Follow-up questions: answer with same depth and rigor
 - Non-curriculum science questions: answer as an elite science tutor`;
 
@@ -212,7 +210,7 @@ app.post('/api/generate', async (req, res) => {
             const timeout = setTimeout(() => controller.abort(), 45000);
 
             const completion = await openai.chat.completions.create({
-                model: 'llama-3.1-8b-instant',
+                model: 'llama3-8b-8192',
                 messages: [
                     { role: 'system', content: dynamicPrompt },
                     ...safeHistory,
