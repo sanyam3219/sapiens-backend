@@ -37,7 +37,7 @@ app.use('/api/', limiter);
 const GROQ_KEYS = [
     process.env.GROQ_API_KEY_1,
     process.env.GROQ_API_KEY_2,
-    process.env.GROQ_API_KEY, // Fallback if single key is set
+    process.env.GROQ_API_KEY, // Fallback if single key is used
 ].filter(Boolean);
 
 if (GROQ_KEYS.length === 0) {
@@ -212,7 +212,7 @@ app.post('/api/generate', async (req, res) => {
             const timeout = setTimeout(() => controller.abort(), 45000);
 
             const completion = await openai.chat.completions.create({
-                model: 'llama-3.1-70b-versatile',
+                model: 'llama-3.3-70b-versatile',
                 messages: [
                     { role: 'system', content: dynamicPrompt },
                     ...safeHistory,
@@ -241,7 +241,6 @@ app.post('/api/generate', async (req, res) => {
                 return res.status(429).json({ error: 'All API keys at daily limit. Resets at 5:30 AM IST.' });
             }
 
-            // Expose error details to frontend instead of generic status mask
             return res.status(500).json({ error: `Backend API Failure (${error.status || 500}): ${error.message}` });
         }
     }
