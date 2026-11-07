@@ -212,7 +212,7 @@ app.post('/api/generate', async (req, res) => {
             const timeout = setTimeout(() => controller.abort(), 45000);
 
             const completion = await openai.chat.completions.create({
-                model: 'llama-3.3-70b-versatile',
+                model: 'openai/gpt-oss-120b',
                 messages: [
                     { role: 'system', content: dynamicPrompt },
                     ...safeHistory,
