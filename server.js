@@ -37,12 +37,11 @@ app.use('/api/', limiter);
 const GROQ_KEYS = [
     process.env.GROQ_API_KEY_1,
     process.env.GROQ_API_KEY_2,
-    // process.env.GROQ_API_KEY_3,
-    // process.env.GROQ_API_KEY_4,
+    process.env.GROQ_API_KEY, // Fallback for single key configuration
 ].filter(Boolean);
 
 if (GROQ_KEYS.length === 0) {
-    console.error('FATAL: No Groq API keys found. Set GROQ_API_KEY_1 and GROQ_API_KEY_2 in environment.');
+    console.error('FATAL: No Groq API keys found. Set GROQ_API_KEY_1, GROQ_API_KEY_2, or GROQ_API_KEY in environment.');
     process.exit(1);
 }
 
@@ -205,12 +204,12 @@ app.post('/api/generate', async (req, res) => {
         ? `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nLIVE WEB CONTEXT — Real URLs found for "${cleanTopic}":\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${webContext}\n\nUse these exact URLs in the Course Link column wherever they match. Do not fabricate any other direct URLs.`
         : '');
 
-    // Try each key — only rotate on 429
+    // Try each key — rotate on 429 rate limits
     for (let attempt = 0; attempt < GROQ_KEYS.length; attempt++) {
         try {
             const openai = getGroqClient();
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 45000); // increased for longer responses
+            const timeout = setTimeout(() => controller.abort(), 45000);
 
             const completion = await openai.chat.completions.create({
                 model: 'llama-3.3-70b-versatile',
@@ -219,8 +218,8 @@ app.post('/api/generate', async (req, res) => {
                     ...safeHistory,
                     { role: 'user', content: cleanTopic }
                 ],
-                max_tokens: 4000, // increased for the larger response
-                temperature: 0.2, // lower = more precise URLs
+                max_tokens: 4000,
+                temperature: 0.2,
             }, { signal: controller.signal });
 
             clearTimeout(timeout);
@@ -231,8 +230,9 @@ app.post('/api/generate', async (req, res) => {
             return res.json({ result });
 
         } catch (error) {
+            console.error(`[Groq Attempt ${attempt + 1} Error]:`, error.status || error.code || error.name, error.message);
+
             if (error.name === 'AbortError') {
-                console.error('[Timeout] Groq took too long.');
                 return res.status(504).json({ error: 'Request timed out. Please try again.' });
             }
             if (error.status === 429) {
@@ -240,8 +240,9 @@ app.post('/api/generate', async (req, res) => {
                 if (attempt < GROQ_KEYS.length - 1) continue;
                 return res.status(429).json({ error: 'All API keys at daily limit. Resets at 5:30 AM IST.' });
             }
-            console.error('[Groq Error]', error.message);
-            return res.status(500).json({ error: 'System failure. Please try again.' });
+
+            // Detailed status output for easier debugging in Render logs
+            return res.status(500).json({ error: `Backend API Failure (${error.status || 500}): ${error.message}` });
         }
     }
 });
